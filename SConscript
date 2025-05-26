@@ -11,6 +11,7 @@ core_mqtt.c
 core_mqtt_state.c
 core_mqtt_serializer.c
 port/port.c
+example.c
 ''')
 
 path =  [cwd]
