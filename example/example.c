@@ -25,6 +25,7 @@ static MQTTContext_t mqttContext;
 static TransportInterface_t transport;
 static MQTTFixedBuffer_t networkBuffer;
 static uint8_t buffer[2048];
+static volatile struct sockaddr_in server_addr;
 
 void mqtt_event_callback(MQTTContext_t * pContext, MQTTPacketInfo_t * pPacketInfo, MQTTDeserializedInfo_t * pDeserializedInfo) {
     if (pPacketInfo->type == MQTT_PACKET_TYPE_PUBLISH) {
@@ -48,7 +49,6 @@ static void mqtt_task(void * parameter) {
     char * broker_ip = inet_ntoa(*(struct in_addr *)host->h_addr_list[0]);
     rt_kprintf("Resolved to IP: %s\n", broker_ip);
 
-    struct sockaddr_in server_addr;
     networkContext.socket = socket(AF_INET, SOCK_STREAM, 0);
     if (networkContext.socket < 0) {
         rt_kprintf("Socket creation failed: %d\n", errno);
