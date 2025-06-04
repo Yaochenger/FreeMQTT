@@ -17,8 +17,8 @@ typedef struct NetworkContext
     int socket;
 } NetworkContext_t;
 
-int32_t rtthread_send(NetworkContext_t * pNetworkContext, const void * pBuffer, size_t bytesToSend);
-int32_t rtthread_recv(NetworkContext_t * pNetworkContext, void * pBuffer, size_t bytesToRecv);
 uint32_t getCurrentTime(void);
+int32_t transportSend(NetworkContext_t *pNetworkContext, const void *pBuffer, size_t bytesToSend);
+int32_t transportRecv(NetworkContext_t *pNetworkContext, void *pBuffer, size_t bytesToRead);
 
 #endif /* APPLICATIONS_FIREMQTT_PORT_PORT_H_ */
