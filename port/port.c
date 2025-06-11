@@ -10,7 +10,7 @@
 
 uint32_t getCurrentTime(void)
 {
-    return rt_tick_get() / (1000 / RT_TICK_PER_SECOND);
+    return rt_tick_get() / (1000 / RT_TICK_PER_SECOND); //ms
 }
 
 int32_t transportSend(NetworkContext_t *pNetworkContext, const void *pBuffer, size_t bytesToSend)

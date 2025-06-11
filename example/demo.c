@@ -15,24 +15,38 @@ static NetworkContext_t networkContext;
 extern MQTTFixedBuffer_t mqttBuffer;
 extern MQTTContext_t mqttContext;
 
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-
 static void mqttEventCallback(MQTTContext_t *pContext, MQTTPacketInfo_t *pPacketInfo,
         MQTTDeserializedInfo_t *pDeserializedInfo)
 {
-    if (pPacketInfo->type == MQTT_PACKET_TYPE_PUBLISH)
+    if (!pContext || !pPacketInfo)
     {
-        MQTTPublishInfo_t *pPublishInfo = pDeserializedInfo->pPublishInfo;
-        rt_kprintf("收到主题 %.*s 的消息: %.*s\n", pPublishInfo->topicNameLength, pPublishInfo->pTopicName,
-                pPublishInfo->payloadLength, (const char *) pPublishInfo->pPayload);
+        rt_kprintf("Error: Invalid context or packet info\n");
+        return;
     }
-    else if (pPacketInfo->type == MQTT_PACKET_TYPE_SUBACK)
+
+    switch (pPacketInfo->type)
     {
-        rt_kprintf("订阅确认\n");
-    }
-    else if (pPacketInfo->type == MQTT_PACKET_TYPE_PUBACK)
-    {
-        rt_kprintf("发布确认\n");
+        case MQTT_PACKET_TYPE_PUBLISH:
+        {
+            if (!pDeserializedInfo || !pDeserializedInfo->pPublishInfo)
+            {
+                rt_kprintf("Error: Invalid publish info\n");
+                return;
+            }
+            MQTTPublishInfo_t *pPublishInfo = pDeserializedInfo->pPublishInfo;
+            rt_kprintf("Received message on topic '%.*s': %.*s\n", pPublishInfo->topicNameLength, pPublishInfo->pTopicName,
+                    pPublishInfo->payloadLength, (const char *) pPublishInfo->pPayload);
+            break;
+        }
+        case MQTT_PACKET_TYPE_SUBACK:
+            rt_kprintf("Subscription ACK\n");
+            break;
+        case MQTT_PACKET_TYPE_PUBACK:
+            rt_kprintf("Publish ACK\n"); // QoS0 messages do not trigger this callback.
+            break;
+        default:
+            rt_kprintf("Unhandled packet type: %d\n", pPacketInfo->type);
+            break;
     }
 }
 
@@ -46,109 +60,125 @@ static void mqttClientTask(void *parameter)
 
     if (mqttInit(&networkContext, mqttEventCallback) != MQTTSuccess)
     {
-        rt_kprintf("MQTT 初始化失败\n");
+        rt_kprintf("MQTT initialization failed\n");
         return;
     }
 
     while (1)
     {
-        if (mqttConnect(&networkContext) != MQTTSuccess)
-        {
-            if (retryCount++ >= MAX_RETRY_ATTEMPTS)
-            {
-                rt_kprintf("达到最大重试次数，放弃重连\n");
-                break;
-            }
-            rt_kprintf("将在 %d 毫秒后重试连接\n", backoffMs);
-            rt_thread_mdelay(backoffMs);
-            backoffMs = MIN(backoffMs * 2, MAX_BACKOFF_MS);
-            continue;
-        }
-
-        /* 重置重连参数 */
-        retryCount = 0;
-        backoffMs = INITIAL_BACKOFF_MS;
-        lastPublishTime = getCurrentTime();
-
-        /* 订阅主题 */
-        if (mqttSubscribe() != MQTTSuccess)
-        {
-            closesocket(networkContext.socket);
-            continue;
-        }
-
-        /* 主循环：处理消息和发布 */
-        while (1)
-        {
-            uint32_t currentTime = getCurrentTime();
-
-            /* 检查是否有数据可读 */
-            if (isSocketReadable(networkContext.socket, 100))
-            {
-                /* 处理传入的 MQTT 消息 */
-                status = MQTT_ProcessLoop(&mqttContext);
-                if (status != MQTTSuccess)
-                {
-                    rt_kprintf("MQTT_ProcessLoop 失败: %d\n", status);
-                    break;
-                }
-            }
-
-            /* 定期发布消息 */
-            if (currentTime - lastPublishTime >= publishIntervalMs)
-            {
-                static int counter = 0;
-                char payload[64];
-                rt_sprintf(payload, "来自 RT-Thread 的消息: %d", counter++);
-                if (mqttPublish(payload) != MQTTSuccess)
-                {
-                    rt_kprintf("发布失败，准备重连\n");
-                    break;
-                }
-                lastPublishTime = currentTime;
-            }
-
-            /* 短暂延时，避免CPU占用过高 */
-            rt_thread_mdelay(50);
-        }
-
-        /* 关闭套接字 */
         if (networkContext.socket >= 0)
         {
             closesocket(networkContext.socket);
             networkContext.socket = -1;
         }
 
-        /* 准备重连 */
-        rt_kprintf("MQTT 连接断开，准备重连\n");
+        if (mqttConnect(&networkContext) != MQTTSuccess)
+        {
+            if (retryCount++ >= MAX_RETRY_ATTEMPTS)
+            {
+                rt_kprintf("Maximum retry attempts reached, resetting retry count after 60s\n");
+                rt_thread_mdelay(60000);
+                retryCount = 0;
+                backoffMs = INITIAL_BACKOFF_MS;
+                continue;
+            }
+            rt_kprintf("Connection failed (MQTTServerRefused), retrying in %d ms\n", backoffMs);
+            rt_thread_mdelay(backoffMs);
+            backoffMs = MIN(backoffMs * 2, MAX_BACKOFF_MS);
+            continue;
+        }
+
+        retryCount = 0;
+        backoffMs = INITIAL_BACKOFF_MS;
+        lastPublishTime = getCurrentTime();
+
+        MQTTSubscribeInfo_t subscribeInfo = {
+            .qos = MQTTQoS0,
+            .pTopicFilter = MQTT_TOPIC_SUB,
+            .topicFilterLength = strlen(MQTT_TOPIC_SUB)
+        };
+
+        if (mqttSubscribe(&subscribeInfo) != MQTTSuccess)
+        {
+            rt_kprintf("Subscription failed\n");
+            closesocket(networkContext.socket);
+            continue;
+        }
+
+        while (1)
+        {
+            uint32_t currentTime = getCurrentTime();
+
+            if (isSocketReadable(networkContext.socket, 100))
+            {
+                status = MQTT_ProcessLoop(&mqttContext);
+                if (status != MQTTSuccess)
+                {
+                    rt_kprintf("MQTT_ProcessLoop failed: %d (%s)\n", status,
+                               status == MQTTRecvFailed ? "Receive failed" :
+                               status == MQTTBadResponse ? "Bad response" : "Other error");
+                    break;
+                }
+            }
+
+            if (currentTime - lastPublishTime >= publishIntervalMs)
+            {
+                static int counter = 0;
+                char payload[64];
+                rt_sprintf(payload, "[%d]Message from RT-Thread: Hello World", counter++);
+
+                MQTTPublishInfo_t publishInfo = {
+                    .qos = MQTTQoS0,
+                    .pTopicName = MQTT_TOPIC_PUB,
+                    .topicNameLength = strlen(MQTT_TOPIC_PUB),
+                    .pPayload = payload,
+                    .payloadLength = strlen(payload)
+                };
+
+                if (mqttPublish(&publishInfo) != MQTTSuccess)
+                {
+                    rt_kprintf("Publish failed, preparing to reconnect\n");
+                    break;
+                }
+                lastPublishTime = currentTime;
+            }
+
+            rt_thread_mdelay(50);
+        }
+
+        if (networkContext.socket >= 0)
+        {
+            closesocket(networkContext.socket);
+            networkContext.socket = -1;
+        }
+
+        rt_kprintf("MQTT connection lost, preparing to reconnect in %d ms\n", backoffMs);
         rt_thread_mdelay(backoffMs);
         backoffMs = MIN(backoffMs * 2, MAX_BACKOFF_MS);
     }
 
-    /* 清理资源 */
     if (mqttBuffer.pBuffer != RT_NULL)
     {
         rt_free(mqttBuffer.pBuffer);
         mqttBuffer.pBuffer = RT_NULL;
     }
-    rt_kprintf("MQTT 客户端退出\n");
+    rt_kprintf("MQTT client exited\n");
 }
 
-/* 启动 MQTT 客户端线程 */
 void mqtt_client_start(void)
 {
     rt_thread_t tid = rt_thread_create("mqtt", mqttClientTask,
-    RT_NULL, 4096, /* 栈大小 */
-    10, /* 优先级 */
-    20); /* 时间片 */
+                                               RT_NULL, 4096,
+                                               10,
+                                               20);
     if (tid != RT_NULL)
     {
         rt_thread_startup(tid);
-        rt_kprintf("MQTT 客户端线程启动\n");
+        rt_kprintf("MQTT client thread started\n");
     }
     else
     {
-        rt_kprintf("创建 MQTT 客户端线程失败\n");
+        rt_kprintf("Failed to create MQTT client thread\n");
     }
 }
 

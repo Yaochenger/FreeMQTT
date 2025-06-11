@@ -11,36 +11,33 @@
 #include "mqtt_usr_api.h"
 
 MQTTFixedBuffer_t mqttBuffer = { .pBuffer = RT_NULL, .size = 1024 };
-static TransportInterface_t transportInterface;
 MQTTContext_t mqttContext;
+TransportInterface_t transportInterface;
 
 MQTTStatus_t mqttInit(NetworkContext_t *networkContext, MQTTEventCallback_t userCallback)
 {
     MQTTStatus_t status;
 
-    /* 配置传输接口 */
     transportInterface.pNetworkContext = networkContext;
     transportInterface.send = transportSend;
     transportInterface.recv = transportRecv;
 
-    /* 初始化 MQTT 缓冲区 */
-    mqttBuffer.pBuffer = rt_malloc(mqttBuffer.size);
+    mqttBuffer.pBuffer = rt_malloc(mqttBuffer.size); // 缓存
     if (mqttBuffer.pBuffer == RT_NULL)
     {
-        rt_kprintf("分配 MQTT 缓冲区失败\n");
-        return MQTTSendFailed;
+        rt_kprintf("Failed to allocate MQTT buffer\n");
+        return MQTTNoMemory;
     }
 
-    /* 初始化 MQTT 上下文 */
     status = MQTT_Init(&mqttContext, &transportInterface, getCurrentTime, userCallback, &mqttBuffer);
     if (status != MQTTSuccess)
     {
-        rt_kprintf("MQTT_Init 失败: %d\n", status);
+        rt_kprintf("MQTT_Init failed: %d\n", status);
         rt_free(mqttBuffer.pBuffer);
         return status;
     }
 
-    rt_kprintf("MQTT 客户端初始化成功\n");
+    rt_kprintf("MQTT client initialized successfully\n");
     return MQTTSuccess;
 }
 
@@ -50,17 +47,17 @@ MQTTStatus_t mqttConnect(NetworkContext_t *networkContext)
     MQTTConnectInfo_t connectInfo = { 0 };
     bool sessionPresent;
 
-    /* 配置连接信息 */
+    /* Configure connection information */
     connectInfo.clientIdentifierLength = strlen(MQTT_CLIENT_ID);
     connectInfo.pClientIdentifier = MQTT_CLIENT_ID;
     connectInfo.keepAliveSeconds = MQTT_KEEP_ALIVE;
     connectInfo.cleanSession = true;
 
-    /* 建立 TCP 连接 */
+    /* Establish TCP connection */
     networkContext->socket = socket(AF_INET, SOCK_STREAM, 0);
     if (networkContext->socket < 0)
     {
-        rt_kprintf("创建 socket 失败\n");
+        rt_kprintf("Failed to create socket\n");
         return MQTTSendFailed;
     }
 
@@ -70,7 +67,7 @@ MQTTStatus_t mqttConnect(NetworkContext_t *networkContext)
     struct hostent *host = gethostbyname(MQTT_BROKER_ADDRESS);
     if (host == NULL || host->h_addr_list[0] == NULL)
     {
-        rt_kprintf("解析代理地址失败\n");
+        rt_kprintf("Failed to resolve broker address\n");
         closesocket(networkContext->socket);
         return MQTTSendFailed;
     }
@@ -78,65 +75,53 @@ MQTTStatus_t mqttConnect(NetworkContext_t *networkContext)
 
     if (connect(networkContext->socket, (struct sockaddr *) &serverAddr, sizeof(serverAddr)) < 0)
     {
-        rt_kprintf("连接代理失败\n");
+        rt_kprintf("Failed to connect to broker\n");
         closesocket(networkContext->socket);
         return MQTTSendFailed;
     }
 
-    /* MQTT 连接 */
+    /* MQTT connection */
     status = MQTT_Connect(&mqttContext, &connectInfo, NULL, 10000, &sessionPresent);
     if (status != MQTTSuccess)
     {
-        rt_kprintf("MQTT_Connect 失败: %d\n", status);
+        rt_kprintf("MQTT_Connect failed: %d\n", status);
         closesocket(networkContext->socket);
         return status;
     }
 
-    rt_kprintf("成功连接到 MQTT 代理\n");
+    rt_kprintf("Successfully connected to MQTT broker\n");
     return MQTTSuccess;
 }
 
-MQTTStatus_t mqttSubscribe(void)
+MQTTStatus_t mqttSubscribe(MQTTSubscribeInfo_t *subscribeInfo)
 {
     MQTTStatus_t status;
-    MQTTSubscribeInfo_t subscribeInfo = { 0 };
-
-    subscribeInfo.qos = MQTTQoS0;
-    subscribeInfo.pTopicFilter = MQTT_TOPIC_SUB;
-    subscribeInfo.topicFilterLength = strlen(MQTT_TOPIC_SUB);
 
     uint16_t packetId = MQTT_GetPacketId(&mqttContext);
-    status = MQTT_Subscribe(&mqttContext, &subscribeInfo, 1, packetId);
+    status = MQTT_Subscribe(&mqttContext, subscribeInfo, 1, packetId);
     if (status != MQTTSuccess)
     {
-        rt_kprintf("MQTT_Subscribe 失败: %d\n", status);
+        rt_kprintf("MQTT_Subscribe failed: %d\n", status);
         return status;
     }
 
-    rt_kprintf("订阅主题: %s\n", MQTT_TOPIC_SUB);
+    rt_kprintf("Subscribed to topic: %s\n", MQTT_TOPIC_SUB);
     return MQTTSuccess;
 }
 
-MQTTStatus_t mqttPublish(const char *payload)
+MQTTStatus_t mqttPublish(MQTTPublishInfo_t *publishInfo)
 {
     MQTTStatus_t status;
-    MQTTPublishInfo_t publishInfo = { 0 };
-
-    publishInfo.qos = MQTTQoS0;
-    publishInfo.pTopicName = MQTT_TOPIC_PUB;
-    publishInfo.topicNameLength = strlen(MQTT_TOPIC_PUB);
-    publishInfo.pPayload = payload;
-    publishInfo.payloadLength = strlen(payload);
 
     uint16_t packetId = MQTT_GetPacketId(&mqttContext);
-    status = MQTT_Publish(&mqttContext, &publishInfo, packetId);
+    status = MQTT_Publish(&mqttContext, publishInfo, packetId);
     if (status != MQTTSuccess)
     {
-        rt_kprintf("MQTT_Publish 失败: %d\n", status);
+        rt_kprintf("MQTT_Publish failed: %d\n", status);
         return status;
     }
 
-    rt_kprintf("发布消息: %s\n", payload);
+    rt_kprintf("Published message: %s\n", publishInfo->pPayload);
     return MQTTSuccess;
 }
 
