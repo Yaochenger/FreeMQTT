@@ -82,7 +82,7 @@ MQTTStatus_t mqttConnect(NetworkContext_t *networkContext)
 
     /* MQTT connection */
     status = MQTT_Connect(&mqttContext, &connectInfo, NULL, 10000, &sessionPresent);
-    if (status != MQTTSuccess)
+    if ((status != MQTTSuccess) && (status != MQTTStatusConnected))
     {
         rt_kprintf("MQTT_Connect failed: %d\n", status);
         closesocket(networkContext->socket);

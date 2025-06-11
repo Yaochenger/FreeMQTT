@@ -56,7 +56,8 @@ static void mqttClientTask(void *parameter)
     uint32_t retryCount = 0;
     uint32_t backoffMs = INITIAL_BACKOFF_MS;
     uint32_t lastPublishTime = 0;
-    const uint32_t publishIntervalMs = 5000;
+    const uint32_t publishIntervalMs = 1000;
+    bool isConnected = false;
 
     if (mqttInit(&networkContext, mqttEventCallback) != MQTTSuccess)
     {
@@ -72,25 +73,31 @@ static void mqttClientTask(void *parameter)
             networkContext.socket = -1;
         }
 
-        if (mqttConnect(&networkContext) != MQTTSuccess)
+        status = mqttConnect(&networkContext);
+        if (status != MQTTSuccess)
         {
+            rt_kprintf("Connection failed: %d (%s), retrying in %d ms\n", status,
+                       status == MQTTServerRefused ? "Server refused" : "Other error", backoffMs);
             if (retryCount++ >= MAX_RETRY_ATTEMPTS)
             {
                 rt_kprintf("Maximum retry attempts reached, resetting retry count after 60s\n");
                 rt_thread_mdelay(60000);
                 retryCount = 0;
                 backoffMs = INITIAL_BACKOFF_MS;
-                continue;
             }
-            rt_kprintf("Connection failed (MQTTServerRefused), retrying in %d ms\n", backoffMs);
-            rt_thread_mdelay(backoffMs);
-            backoffMs = MIN(backoffMs * 2, MAX_BACKOFF_MS);
+            else
+            {
+                rt_thread_mdelay(backoffMs);
+                backoffMs = MIN(backoffMs * 2, MAX_BACKOFF_MS);
+            }
             continue;
         }
 
+        isConnected = true;
         retryCount = 0;
         backoffMs = INITIAL_BACKOFF_MS;
         lastPublishTime = getCurrentTime();
+        rt_kprintf("Successfully connected to MQTT broker\n");
 
         MQTTSubscribeInfo_t subscribeInfo = {
             .qos = MQTTQoS0,
@@ -101,7 +108,20 @@ static void mqttClientTask(void *parameter)
         if (mqttSubscribe(&subscribeInfo) != MQTTSuccess)
         {
             rt_kprintf("Subscription failed\n");
-            closesocket(networkContext.socket);
+            if (isConnected && networkContext.socket >= 0)
+            {
+                status = MQTT_Disconnect(&mqttContext);
+                if (status != MQTTSuccess)
+                {
+                    rt_kprintf("MQTT_Disconnect failed: %d\n", status);
+                }
+                isConnected = false;
+            }
+            if (networkContext.socket >= 0)
+            {
+                closesocket(networkContext.socket);
+                networkContext.socket = -1;
+            }
             continue;
         }
 
@@ -146,6 +166,17 @@ static void mqttClientTask(void *parameter)
             rt_thread_mdelay(50);
         }
 
+        if (isConnected && networkContext.socket >= 0)
+        {
+            status = MQTT_Disconnect(&mqttContext);
+            if (status != MQTTSuccess)
+            {
+                rt_kprintf("MQTT_Disconnect failed: %d (%s)\n", status,
+                           status == MQTTStatusNotConnected ? "Not connected" : "Other error");
+            }
+            isConnected = false;
+        }
+
         if (networkContext.socket >= 0)
         {
             closesocket(networkContext.socket);
@@ -164,9 +195,11 @@ static void mqttClientTask(void *parameter)
     }
     rt_kprintf("MQTT client exited\n");
 }
-
+#include <wlan_mgnt.h>
 void mqtt_client_start(void)
 {
+    rt_wlan_unregister_event_handler(RT_WLAN_EVT_READY);
+
     rt_thread_t tid = rt_thread_create("mqtt", mqttClientTask,
                                                RT_NULL, 4096,
                                                10,
