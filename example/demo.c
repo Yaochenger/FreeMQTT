@@ -6,9 +6,13 @@
 #include <string.h>
 #include <stdlib.h>
 #include "port.h"
-#include <sys/select.h>  // 添加select相关定义
-#include <unistd.h>      // 添加close等系统调用定义
+#include <sys/select.h>
+#include <unistd.h>
 #include "port.h"
+
+#define DBG_TAG "MQTT"
+#define DBG_LVL DBG_LOG
+
 #include "mqtt_usr_api.h"
 
 static NetworkContext_t networkContext;
@@ -45,7 +49,7 @@ static void mqttEventCallback(MQTTContext_t *pContext, MQTTPacketInfo_t *pPacket
             rt_kprintf("Publish ACK\n"); // QoS0 messages do not trigger this callback.
             break;
         default:
-            rt_kprintf("Unhandled packet type: %d\n", pPacketInfo->type);
+            rt_kprintf("Other packet type\n");
             break;
     }
 }
@@ -55,13 +59,11 @@ static void mqttClientTask(void *parameter)
     MQTTStatus_t status;
     uint32_t retryCount = 0;
     uint32_t backoffMs = INITIAL_BACKOFF_MS;
-    uint32_t lastPublishTime = 0;
-    const uint32_t publishIntervalMs = 1000;
     bool isConnected = false;
 
     if (mqttInit(&networkContext, mqttEventCallback) != MQTTSuccess)
     {
-        rt_kprintf("MQTT initialization failed\n");
+        MQTT_PRINT("MQTT initialization failed\n");
         return;
     }
 
@@ -76,12 +78,11 @@ static void mqttClientTask(void *parameter)
         status = mqttConnect(&networkContext);
         if (status != MQTTSuccess)
         {
-            rt_kprintf("Connection failed: %d (%s), retrying in %d ms\n", status,
-                       status == MQTTServerRefused ? "Server refused" : "Other error", backoffMs);
+            MQTT_PRINT("Connection failed: %d (%s), retrying in %d ms\n", status, mqttStatus(status), backoffMs);
             if (retryCount++ >= MAX_RETRY_ATTEMPTS)
             {
-                rt_kprintf("Maximum retry attempts reached, resetting retry count after 60s\n");
-                rt_thread_mdelay(60000);
+                MQTT_PRINT("Maximum retry attempts reached, resetting retry count after 60s\n");
+                rt_thread_mdelay(30000);
                 retryCount = 0;
                 backoffMs = INITIAL_BACKOFF_MS;
             }
@@ -96,74 +97,19 @@ static void mqttClientTask(void *parameter)
         isConnected = true;
         retryCount = 0;
         backoffMs = INITIAL_BACKOFF_MS;
-        lastPublishTime = getCurrentTime();
-        rt_kprintf("Successfully connected to MQTT broker\n");
-
-        MQTTSubscribeInfo_t subscribeInfo = {
-            .qos = MQTTQoS0,
-            .pTopicFilter = MQTT_TOPIC_SUB,
-            .topicFilterLength = strlen(MQTT_TOPIC_SUB)
-        };
-
-        if (mqttSubscribe(&subscribeInfo) != MQTTSuccess)
-        {
-            rt_kprintf("Subscription failed\n");
-            if (isConnected && networkContext.socket >= 0)
-            {
-                status = MQTT_Disconnect(&mqttContext);
-                if (status != MQTTSuccess)
-                {
-                    rt_kprintf("MQTT_Disconnect failed: %d\n", status);
-                }
-                isConnected = false;
-            }
-            if (networkContext.socket >= 0)
-            {
-                closesocket(networkContext.socket);
-                networkContext.socket = -1;
-            }
-            continue;
-        }
 
         while (1)
         {
-            uint32_t currentTime = getCurrentTime();
-
             if (isSocketReadable(networkContext.socket, 100))
             {
                 status = MQTT_ProcessLoop(&mqttContext);
                 if (status != MQTTSuccess)
                 {
-                    rt_kprintf("MQTT_ProcessLoop failed: %d (%s)\n", status,
-                               status == MQTTRecvFailed ? "Receive failed" :
-                               status == MQTTBadResponse ? "Bad response" : "Other error");
+                    MQTT_PRINT("MQTT_ProcessLoop failed: %d (%s)\n", status, mqttStatus(status));
                     break;
                 }
             }
-
-            if (currentTime - lastPublishTime >= publishIntervalMs)
-            {
-                static int counter = 0;
-                char payload[64];
-                rt_sprintf(payload, "[%d]Message from RT-Thread: Hello World", counter++);
-
-                MQTTPublishInfo_t publishInfo = {
-                    .qos = MQTTQoS0,
-                    .pTopicName = MQTT_TOPIC_PUB,
-                    .topicNameLength = strlen(MQTT_TOPIC_PUB),
-                    .pPayload = payload,
-                    .payloadLength = strlen(payload)
-                };
-
-                if (mqttPublish(&publishInfo) != MQTTSuccess)
-                {
-                    rt_kprintf("Publish failed, preparing to reconnect\n");
-                    break;
-                }
-                lastPublishTime = currentTime;
-            }
-
-            rt_thread_mdelay(50);
+            rt_thread_mdelay(MQTT_LOOP_CNT);
         }
 
         if (isConnected && networkContext.socket >= 0)
@@ -171,8 +117,7 @@ static void mqttClientTask(void *parameter)
             status = MQTT_Disconnect(&mqttContext);
             if (status != MQTTSuccess)
             {
-                rt_kprintf("MQTT_Disconnect failed: %d (%s)\n", status,
-                           status == MQTTStatusNotConnected ? "Not connected" : "Other error");
+                MQTT_PRINT("MQTT_Disconnect failed: %d (%s)\n", status, mqttStatus(status));
             }
             isConnected = false;
         }
@@ -183,7 +128,7 @@ static void mqttClientTask(void *parameter)
             networkContext.socket = -1;
         }
 
-        rt_kprintf("MQTT connection lost, preparing to reconnect in %d ms\n", backoffMs);
+        MQTT_PRINT("MQTT connection lost, preparing to reconnect in %d ms\n", backoffMs);
         rt_thread_mdelay(backoffMs);
         backoffMs = MIN(backoffMs * 2, MAX_BACKOFF_MS);
     }
@@ -193,29 +138,83 @@ static void mqttClientTask(void *parameter)
         rt_free(mqttBuffer.pBuffer);
         mqttBuffer.pBuffer = RT_NULL;
     }
-    rt_kprintf("MQTT client exited\n");
+    MQTT_PRINT("MQTT client exited\n");
 }
+
 #include <wlan_mgnt.h>
 void mqtt_client_start(void)
 {
     rt_wlan_unregister_event_handler(RT_WLAN_EVT_READY);
 
     rt_thread_t tid = rt_thread_create("mqtt", mqttClientTask,
-                                               RT_NULL, 4096,
-                                               10,
-                                               20);
+    RT_NULL, 4096, 10, 20);
     if (tid != RT_NULL)
     {
         rt_thread_startup(tid);
-        rt_kprintf("MQTT client thread started\n");
+        MQTT_PRINT("MQTT client thread started\n");
     }
     else
     {
-        rt_kprintf("Failed to create MQTT client thread\n");
+        MQTT_PRINT("Failed to create MQTT client thread\n");
     }
 }
 
+static int mqtt_pub(int argc, char **argv)
+{
+    MQTTStatus_t status;
+    MQTTPublishInfo_t publishInfo;
+
+    if (argc != 2)
+    {
+        rt_kprintf("Usage: mqtt_pub <message>\n");
+        return -RT_ERROR;
+    }
+
+    publishInfo.qos = MQTTQoS0;
+    publishInfo.pTopicName = MQTT_TOPIC_PUB;
+    publishInfo.topicNameLength = strlen(MQTT_TOPIC_PUB);
+    publishInfo.pPayload = argv[1];
+    publishInfo.payloadLength = strlen(argv[1]);
+
+    status = mqttPublish(&publishInfo);
+    if (status != MQTTSuccess)
+    {
+        rt_kprintf("MQTT publish failed: %d (%s)\n", status, mqttStatus(status));
+        return -RT_ERROR;
+    }
+
+    rt_kprintf("Published message: %s to topic: %s\n", argv[1], MQTT_TOPIC_PUB);
+    return RT_EOK;
+}
 #ifdef RT_USING_FINSH
-#include <finsh.h>
-FINSH_FUNCTION_EXPORT(mqtt_client_start, 启动 MQTT 客户端);
+MSH_CMD_EXPORT_ALIAS(mqtt_pub, mqtt_pub, Send MQTT message);
+#endif
+
+static int mqtt_sub(int argc, char **argv)
+{
+    MQTTStatus_t status;
+    MQTTSubscribeInfo_t subscribeInfo;
+
+    if (argc != 2)
+    {
+        rt_kprintf("Usage: mqtt_sub <topic>\n");
+        return -RT_ERROR;
+    }
+
+    subscribeInfo.qos = MQTTQoS0;
+    subscribeInfo.pTopicFilter = argv[1];
+    subscribeInfo.topicFilterLength = strlen(argv[1]);
+
+    status = mqttSubscribe(&subscribeInfo);
+    if (status != MQTTSuccess)
+    {
+        rt_kprintf("MQTT subscribe failed: %d (%s)\n", status, mqttStatus(status));
+        return -RT_ERROR;
+    }
+
+    rt_kprintf("Subscribed to topic: %s\n", argv[1]);
+    return RT_EOK;
+}
+#ifdef RT_USING_FINSH
+MSH_CMD_EXPORT_ALIAS(mqtt_sub, mqtt_sub, Subscribe MQTT message);
 #endif

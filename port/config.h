@@ -5,7 +5,7 @@
  *
  * Change Logs:
  * Date           Author       Notes
- * 2025-06-10     RTT       the first version
+ * 2025-06-10     RV          the first version
  */
 #ifndef APPLICATIONS_FIREMQTT_PORT_CONFIG_H_
 #define APPLICATIONS_FIREMQTT_PORT_CONFIG_H_

@@ -5,8 +5,11 @@
  *
  * Change Logs:
  * Date           Author       Notes
- * 2025-06-03     RTT       the first version
+ * 2025-06-03     RV          the first version
  */
+
+#define DBG_TAG "MQTT"
+#define DBG_LVL DBG_LOG
 
 #include "mqtt_usr_api.h"
 
@@ -25,19 +28,19 @@ MQTTStatus_t mqttInit(NetworkContext_t *networkContext, MQTTEventCallback_t user
     mqttBuffer.pBuffer = rt_malloc(mqttBuffer.size); // 缓存
     if (mqttBuffer.pBuffer == RT_NULL)
     {
-        rt_kprintf("Failed to allocate MQTT buffer\n");
+        MQTT_PRINT("Failed to allocate MQTT buffer\n");
         return MQTTNoMemory;
     }
 
     status = MQTT_Init(&mqttContext, &transportInterface, getCurrentTime, userCallback, &mqttBuffer);
     if (status != MQTTSuccess)
     {
-        rt_kprintf("MQTT_Init failed: %d\n", status);
+        MQTT_PRINT("MQTT_Init failed: %d\n", status);
         rt_free(mqttBuffer.pBuffer);
         return status;
     }
 
-    rt_kprintf("MQTT client initialized successfully\n");
+    MQTT_PRINT("MQTT client initialized successfully\n");
     return MQTTSuccess;
 }
 
@@ -57,17 +60,16 @@ MQTTStatus_t mqttConnect(NetworkContext_t *networkContext)
     networkContext->socket = socket(AF_INET, SOCK_STREAM, 0);
     if (networkContext->socket < 0)
     {
-        rt_kprintf("Failed to create socket\n");
+        MQTT_PRINT("Failed to create socket\n");
         return MQTTSendFailed;
     }
-
     struct sockaddr_in serverAddr = { 0 };
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(MQTT_BROKER_PORT);
     struct hostent *host = gethostbyname(MQTT_BROKER_ADDRESS);
     if (host == NULL || host->h_addr_list[0] == NULL)
     {
-        rt_kprintf("Failed to resolve broker address\n");
+        MQTT_PRINT("Failed to resolve broker address\n");
         closesocket(networkContext->socket);
         return MQTTSendFailed;
     }
@@ -75,7 +77,7 @@ MQTTStatus_t mqttConnect(NetworkContext_t *networkContext)
 
     if (connect(networkContext->socket, (struct sockaddr *) &serverAddr, sizeof(serverAddr)) < 0)
     {
-        rt_kprintf("Failed to connect to broker\n");
+        MQTT_PRINT("Failed to connect to broker\n");
         closesocket(networkContext->socket);
         return MQTTSendFailed;
     }
@@ -84,12 +86,12 @@ MQTTStatus_t mqttConnect(NetworkContext_t *networkContext)
     status = MQTT_Connect(&mqttContext, &connectInfo, NULL, 10000, &sessionPresent);
     if ((status != MQTTSuccess) && (status != MQTTStatusConnected))
     {
-        rt_kprintf("MQTT_Connect failed: %d\n", status);
+        MQTT_PRINT("MQTT_Connect failed: %d\n", status);
         closesocket(networkContext->socket);
         return status;
     }
 
-    rt_kprintf("Successfully connected to MQTT broker\n");
+    rt_kprintf("MQTT broker connected\n");
     return MQTTSuccess;
 }
 
@@ -101,11 +103,11 @@ MQTTStatus_t mqttSubscribe(MQTTSubscribeInfo_t *subscribeInfo)
     status = MQTT_Subscribe(&mqttContext, subscribeInfo, 1, packetId);
     if (status != MQTTSuccess)
     {
-        rt_kprintf("MQTT_Subscribe failed: %d\n", status);
+        MQTT_PRINT("MQTT_Subscribe failed: %d\n", status);
         return status;
     }
 
-    rt_kprintf("Subscribed to topic: %s\n", MQTT_TOPIC_SUB);
+    MQTT_PRINT("Subscribed to topic: %s\n", MQTT_TOPIC_SUB);
     return MQTTSuccess;
 }
 
@@ -117,11 +119,11 @@ MQTTStatus_t mqttPublish(MQTTPublishInfo_t *publishInfo)
     status = MQTT_Publish(&mqttContext, publishInfo, packetId);
     if (status != MQTTSuccess)
     {
-        rt_kprintf("MQTT_Publish failed: %d\n", status);
+        MQTT_PRINT("MQTT_Publish failed: %d\n", status);
         return status;
     }
 
-    rt_kprintf("Published message: %s\n", publishInfo->pPayload);
+    MQTT_PRINT("Published message: %s\n", publishInfo->pPayload);
     return MQTTSuccess;
 }
 
@@ -138,4 +140,33 @@ bool isSocketReadable(int socket, int timeout_ms)
 
     int result = select(socket + 1, &readfds, NULL, NULL, &timeout);
     return (result > 0 && FD_ISSET(socket, &readfds));
+}
+
+const char *mqttStatus(MQTTStatus_t status)
+{
+    static const char *const statusStrings[] = {
+        "Success",
+        "BadParameter",
+        "NoMemory",
+        "SendFailed",
+        "RecvFailed",
+        "BadResponse",
+        "ServerRefused",
+        "NoDataAvailable",
+        "IllegalState",
+        "StateCollision",
+        "KeepAliveTimeout",
+        "NeedMoreBytes",
+        "Connected",
+        "NotConnected",
+        "DisconnectPending",
+        "PublishStoreFailed",
+        "PublishRetrieveFailed"
+    };
+
+    if (status >= 0 && status < sizeof(statusStrings) / sizeof(statusStrings[0]))
+    {
+        return statusStrings[status];
+    }
+    return "Unknown";
 }
