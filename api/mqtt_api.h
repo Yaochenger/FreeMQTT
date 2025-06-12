@@ -8,6 +8,7 @@
  * 2025-06-03     RV           the first version
  */
 #ifndef APPLICATIONS_FIREMQTT_PORT_MQTT_USR_API_H_
+
 #define APPLICATIONS_FIREMQTT_PORT_MQTT_USR_API_H_
 #include <rtthread.h>
 #include <core_mqtt.h>
@@ -21,7 +22,7 @@
 #include <unistd.h>      // 添加close等系统调用定义
 #include "port.h"
 #include <rtdbg.h>
-#include "config.h"
+#include <core_mqtt_config.h>
 
 #ifdef RT_USING_ULOG
 #define MQTT_PRINT(fmt, ...) LOG_D(fmt, ##__VA_ARGS__)
