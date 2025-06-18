@@ -19,10 +19,12 @@
 #define MQTT_LOOP_CNT        60
 #define MQTT_RECV_POLLING_TIMEOUT_MS    ( 0U )
 #define MQTT_PINGRESP_TIMEOUT_MS    ( 10000U )
+#define MQTT_OUTgoing_PublishCount 30
 
 #define MAX_RETRY_ATTEMPTS   5                      // 最大重试次数
 #define INITIAL_BACKOFF_MS   1000                   // 初始重连退避时间（毫秒）
 #define MAX_BACKOFF_MS       60000
+//#define LogDebug(args) do { rt_kprintf args; rt_kprintf("\n"); } while (0)
 
 #define MQTT_USERCALLBACK mqttEventCallback
 

@@ -17,6 +17,7 @@ static MQTTFixedBuffer_t mqttBuffer = { .pBuffer = RT_NULL, .size = 1024 };
 static MQTTContext_t mqttContext;
 static TransportInterface_t transportInterface;
 static NetworkContext_t networkContext;
+static MQTTPubAckInfo_t outgoingPublishes[MQTT_OUTgoing_PublishCount];
 
 MQTTStatus_t mqttInit(NetworkContext_t *networkContext, MQTTEventCallback_t userCallback)
 {
@@ -40,8 +41,12 @@ MQTTStatus_t mqttInit(NetworkContext_t *networkContext, MQTTEventCallback_t user
         rt_free(mqttBuffer.pBuffer);
         return status;
     }
+    else
+    {
+        status = MQTT_InitStatefulQoS(&mqttContext, outgoingPublishes, MQTT_OUTgoing_PublishCount, NULL, 0);
+        MQTT_PRINT("MQTT client initialized successfully\n");
+    }
 
-    MQTT_PRINT("MQTT client initialized successfully\n");
     return MQTTSuccess;
 }
 

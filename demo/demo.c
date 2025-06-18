@@ -34,7 +34,7 @@ static int mqtt_pub(int argc, char **argv)
         return -RT_ERROR;
     }
 
-    publishInfo.qos = MQTTQoS0;
+    publishInfo.qos = MQTTQoS2;
     publishInfo.pTopicName = MQTT_TOPIC_PUB;
     publishInfo.topicNameLength = strlen(MQTT_TOPIC_PUB);
     publishInfo.pPayload = argv[1];
