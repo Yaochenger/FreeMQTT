@@ -13,11 +13,11 @@
 
 #include "mqtt_api.h"
 
-static MQTTFixedBuffer_t mqttBuffer = { .pBuffer = RT_NULL, .size = 1024 };
+static MQTTFixedBuffer_t mqttBuffer = { .pBuffer = RT_NULL, .size = MQTT_BUF_SIZE };
 static MQTTContext_t mqttContext;
 static TransportInterface_t transportInterface;
 static NetworkContext_t networkContext;
-static MQTTPubAckInfo_t outgoingPublishes[MQTT_OUTgoing_PublishCount];
+static MQTTPubAckInfo_t outgoingPublishes[MQTT_OUTGOING_PUBLISH_COUNT];
 
 MQTTStatus_t mqttInit(NetworkContext_t *networkContext, MQTTEventCallback_t userCallback)
 {
@@ -27,7 +27,7 @@ MQTTStatus_t mqttInit(NetworkContext_t *networkContext, MQTTEventCallback_t user
     transportInterface.send = transportSend;
     transportInterface.recv = transportRecv;
 
-    mqttBuffer.pBuffer = rt_malloc(mqttBuffer.size); // 缓存
+    mqttBuffer.pBuffer = rt_malloc(mqttBuffer.size);
     if (mqttBuffer.pBuffer == RT_NULL)
     {
         MQTT_PRINT("Failed to allocate MQTT buffer\n");
@@ -43,7 +43,7 @@ MQTTStatus_t mqttInit(NetworkContext_t *networkContext, MQTTEventCallback_t user
     }
     else
     {
-        status = MQTT_InitStatefulQoS(&mqttContext, outgoingPublishes, MQTT_OUTgoing_PublishCount, NULL, 0);
+        status = MQTT_InitStatefulQoS(&mqttContext, outgoingPublishes, MQTT_OUTGOING_PUBLISH_COUNT, NULL, 0);
         MQTT_PRINT("MQTT client initialized successfully\n");
     }
 
@@ -203,7 +203,7 @@ void mqttClientTask(void *parameter)
     uint32_t backoffMs = INITIAL_BACKOFF_MS;
     bool isConnected = false;
 
-    if (mqttInit(&networkContext, mqttEventCallback) != MQTTSuccess)
+    if (mqttInit(&networkContext, MQTT_USER_CALLBACK) != MQTTSuccess)
     {
         MQTT_PRINT("MQTT initialization failed\n");
         return;

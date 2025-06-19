@@ -6,12 +6,17 @@
 
 #include "mqtt_api.h"
 
+#define CORE_MQTTT_STACK_SIZE       4096
+#define CORE_MQTTT_PRIORITY         10
+#define CORE_MQTTT_TIMESLICE        20
+
 void mqtt_client_start(void)
 {
-    rt_wlan_unregister_event_handler(RT_WLAN_EVT_READY);
-
     rt_thread_t tid = rt_thread_create("mqtt", mqttClientTask,
-    RT_NULL, 4096, 10, 20);
+                                               RT_NULL,
+                                               CORE_MQTTT_STACK_SIZE,
+                                               CORE_MQTTT_PRIORITY,
+                                               CORE_MQTTT_TIMESLICE);
     if (tid != RT_NULL)
     {
         rt_thread_startup(tid);
