@@ -1,5 +1,4 @@
 #include <rtthread.h>
-#include <wlan_mgnt.h>
 
 #define DBG_TAG "MQTT"
 #define DBG_LVL DBG_LOG

@@ -2,8 +2,6 @@ import os
 import rtconfig
 from building import *
 
-Import('SDK_LIB')
-
 cwd = GetCurrentDir()
 
 src = Split('''
